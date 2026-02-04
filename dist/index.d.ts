@@ -1,4 +1,5 @@
-import { GraphApiClient, InstagramMedia } from '@meta-mcp/core';
+import { GraphApiClient, InstagramMedia, ToolRegistry } from '@meta-mcp/core';
+export { ToolDefinition, ToolHandler, ToolRegistry } from '@meta-mcp/core';
 import { z } from 'zod';
 import * as ai from 'ai';
 
@@ -82,17 +83,8 @@ type IgPostPhotoArgs = z.infer<typeof toolSchemas.ig_post_photo>;
 type IgGetRecentMediaArgs = z.infer<typeof toolSchemas.ig_get_recent_media>;
 type IgGetMediaInsightsArgs = z.infer<typeof toolSchemas.ig_get_media_insights>;
 
-interface ToolDefinition {
-    name: ToolName;
-    description: string;
-    inputSchema: Record<string, unknown>;
-}
-type ToolHandler = (args: Record<string, unknown>) => Promise<unknown> | unknown;
-interface ToolRegistry {
-    definitions: ToolDefinition[];
-    handlers: Record<ToolName, ToolHandler>;
-}
-declare const createToolRegistry: (manager: InstagramManager) => ToolRegistry;
+declare const createToolRegistry: (manager: InstagramManager) => ToolRegistry<ToolName>;
+type InstagramToolRegistry = ToolRegistry<ToolName>;
 
 declare const createAiSdkTools: (manager?: InstagramManager) => {
     ig_post_photo: ai.Tool<any, unknown> & {
@@ -106,4 +98,4 @@ declare const createAiSdkTools: (manager?: InstagramManager) => {
     };
 };
 
-export { type IgGetMediaInsightsArgs, type IgGetRecentMediaArgs, type IgPostPhotoArgs, InstagramManager, type ToolDefinition, type ToolHandler, type ToolName, type ToolRegistry, createAiSdkTools, createToolRegistry, toolDescriptions, toolSchemas };
+export { type IgGetMediaInsightsArgs, type IgGetRecentMediaArgs, type IgPostPhotoArgs, InstagramManager, type InstagramToolRegistry, type ToolName, createAiSdkTools, createToolRegistry, toolDescriptions, toolSchemas };

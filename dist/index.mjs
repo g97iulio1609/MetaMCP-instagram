@@ -102,36 +102,26 @@ var toolDescriptions = {
 };
 
 // src/toolRegistry.ts
-import { zodToJsonSchema } from "zod-to-json-schema";
+import { buildToolDefinitions, parseToolArgs } from "@meta-mcp/core";
 var createToolRegistry = (manager) => {
   const handlers = {
     ig_post_photo: async (args) => {
-      const parsed = toolSchemas.ig_post_photo.parse(args);
+      const parsed = parseToolArgs(toolSchemas.ig_post_photo, args);
       return manager.postPhoto(parsed.image_url, parsed.caption, {
         user_tags: parsed.user_tags,
         location_id: parsed.location_id
       });
     },
     ig_get_recent_media: async (args) => {
-      const parsed = toolSchemas.ig_get_recent_media.parse(args);
+      const parsed = parseToolArgs(toolSchemas.ig_get_recent_media, args);
       return manager.getRecentMedia(parsed.limit);
     },
     ig_get_media_insights: async (args) => {
-      const parsed = toolSchemas.ig_get_media_insights.parse(args);
+      const parsed = parseToolArgs(toolSchemas.ig_get_media_insights, args);
       return manager.getMediaInsights(parsed.media_id);
     }
   };
-  const definitions = Object.keys(toolSchemas).map((name) => ({
-    name,
-    description: toolDescriptions[name],
-    inputSchema: zodToJsonSchema(
-      toolSchemas[name],
-      {
-        name,
-        $refStrategy: "none"
-      }
-    )
-  }));
+  const definitions = buildToolDefinitions(toolSchemas, toolDescriptions);
   return { definitions, handlers };
 };
 

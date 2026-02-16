@@ -39,12 +39,138 @@ var InstagramManager = class _InstagramManager {
     }
     return this.publishMedia(container.id);
   }
+  async postStory(imageUrl) {
+    const container = await this.client.request({
+      method: "POST",
+      endpoint: `${this.accountId}/media`,
+      params: {
+        image_url: imageUrl,
+        media_type: "STORIES"
+      },
+      accessToken: graphConfig.accessToken
+    });
+    if (!container.id) {
+      throw new Error("Failed to create story container");
+    }
+    return this.publishMedia(container.id);
+  }
   // TODO: Add postVideo if needed (requires video upgrade)
   async publishMedia(creationId) {
     return this.client.request({
       method: "POST",
       endpoint: `${this.accountId}/media_publish`,
-      params: { creation_id: creationId }
+      params: {
+        creation_id: creationId
+      },
+      accessToken: graphConfig.accessToken
+    });
+  }
+  async postCarousel(imageUrls, caption, options) {
+    const childrenIds = [];
+    for (const url of imageUrls) {
+      const container = await this.client.request({
+        method: "POST",
+        endpoint: `${this.accountId}/media`,
+        params: {
+          image_url: url,
+          is_carousel_item: true
+        },
+        accessToken: graphConfig.accessToken
+      });
+      if (container.id) childrenIds.push(container.id);
+    }
+    if (childrenIds.length < 2) {
+      throw new Error("Failed to create at least 2 carousel items");
+    }
+    const containerParams = {
+      media_type: "CAROUSEL",
+      children: childrenIds
+    };
+    if (caption) containerParams.caption = caption;
+    if (options?.location_id) containerParams.location_id = options.location_id;
+    const carouselContainer = await this.client.request({
+      method: "POST",
+      endpoint: `${this.accountId}/media`,
+      // Instagram API expects comma-separated list for children if passed as query param, or JSON array in body. 
+      // GraphClient sends params as query string or body depending on method? 
+      // Assuming mixed usage here, let's format children correctly.
+      params: {
+        ...containerParams,
+        children: childrenIds.join(",")
+      },
+      accessToken: graphConfig.accessToken
+    });
+    if (!carouselContainer.id) {
+      throw new Error("Failed to create carousel container");
+    }
+    return this.publishMedia(carouselContainer.id);
+  }
+  async postReel(videoUrl, caption, options) {
+    const containerParams = {
+      media_type: "REELS",
+      video_url: videoUrl
+    };
+    if (caption) containerParams.caption = caption;
+    if (options?.cover_url) containerParams.cover_url = options.cover_url;
+    if (options?.location_id) containerParams.location_id = options.location_id;
+    if (options?.share_to_feed !== void 0) containerParams.share_to_feed = options.share_to_feed;
+    const container = await this.client.request({
+      method: "POST",
+      endpoint: `${this.accountId}/media`,
+      params: containerParams,
+      accessToken: graphConfig.accessToken
+    });
+    if (!container.id) {
+      throw new Error("Failed to create reel container");
+    }
+    await this.waitForMediaReady(container.id);
+    return this.publishMedia(container.id);
+  }
+  async waitForMediaReady(containerId) {
+    let attempts = 0;
+    const maxAttempts = 15;
+    while (attempts < maxAttempts) {
+      try {
+        const status = await this.client.request({
+          method: "GET",
+          endpoint: containerId,
+          params: { fields: "status_code" },
+          accessToken: graphConfig.accessToken
+        });
+        if (status.status_code === "FINISHED") return;
+        if (status.status_code === "ERROR") throw new Error("Media processing failed");
+        await new Promise((resolve) => setTimeout(resolve, 2e3));
+        attempts++;
+      } catch (e) {
+        console.error("Error checking media status:", e);
+        return;
+      }
+    }
+  }
+  async getComments(mediaId, limit = 25) {
+    return this.client.request({
+      method: "GET",
+      endpoint: `${mediaId}/comments`,
+      params: {
+        fields: "id,timestamp,text,username,like_count,replies,user",
+        limit
+      },
+      accessToken: graphConfig.accessToken
+    });
+  }
+  async replyComment(commentId, message) {
+    return this.client.request({
+      method: "POST",
+      endpoint: `${commentId}/replies`,
+      params: { message },
+      accessToken: graphConfig.accessToken
+    });
+  }
+  async deleteComment(commentId) {
+    return this.client.request({
+      method: "DELETE",
+      endpoint: commentId,
+      accessToken: graphConfig.accessToken
     });
   }
   async getRecentMedia(limit = 25) {
@@ -88,6 +214,32 @@ var toolSchemas = {
     })).optional().describe("Array of users to tag with x/y coordinates (0.0 to 1.0)"),
     location_id: z.string().optional().describe("Facebook Page ID of the location")
   }),
+  ig_post_story: z.object({
+    image_url: z.string().url().describe("Public URL of the image for the story")
+  }),
+  ig_post_carousel: z.object({
+    image_urls: z.array(z.string().url()).min(2).max(10).describe("Array of public URLs for images in the carousel (2-10 images)"),
+    caption: z.string().optional().describe("Caption for the carousel post"),
+    location_id: z.string().optional().describe("Facebook Page ID of the location")
+  }),
+  ig_post_reel: z.object({
+    video_url: z.string().url().describe("Public URL of the video for the reel"),
+    caption: z.string().optional().describe("Caption for the reel"),
+    cover_url: z.string().url().optional().describe("Public URL for the custom cover image"),
+    location_id: z.string().optional().describe("Facebook Page ID of the location"),
+    share_to_feed: z.boolean().optional().default(true).describe("Whether to share the reel to the feed")
+  }),
+  ig_get_comments: z.object({
+    media_id: z.string().min(1).describe("The ID of the media object to get comments for"),
+    limit: z.number().int().min(1).max(50).optional().default(25)
+  }),
+  ig_reply_comment: z.object({
+    comment_id: z.string().min(1).describe("The ID of the comment to reply to"),
+    message: z.string().min(1).describe("The reply message text")
+  }),
+  ig_delete_comment: z.object({
+    comment_id: z.string().min(1).describe("The ID of the comment to delete")
+  }),
   ig_get_recent_media: z.object({
     limit: z.number().int().min(1).max(50).optional().default(25)
   }),
@@ -97,8 +249,14 @@ var toolSchemas = {
 };
 var toolDescriptions = {
   ig_post_photo: "Publish a photo to Instagram Feed.",
+  ig_post_story: "Publish a photo as an Instagram Story.",
+  ig_post_carousel: "Publish a carousel verification (multiple photos) to Instagram Feed.",
+  ig_post_reel: "Publish a video (Reel) to Instagram.",
   ig_get_recent_media: "Get recent media objects from the Instagram account.",
-  ig_get_media_insights: "Get insights for a specific Instagram media object."
+  ig_get_media_insights: "Get insights for a specific Instagram media object.",
+  ig_get_comments: "Get comments on a specific media object.",
+  ig_reply_comment: "Reply to a specific comment.",
+  ig_delete_comment: "Delete a specific comment/reply."
 };
 
 // src/toolRegistry.ts
@@ -111,6 +269,36 @@ var createToolRegistry = (manager) => {
         user_tags: parsed.user_tags,
         location_id: parsed.location_id
       });
+    },
+    ig_post_story: async (args) => {
+      const parsed = parseToolArgs(toolSchemas.ig_post_story, args);
+      return manager.postStory(parsed.image_url);
+    },
+    ig_post_carousel: async (args) => {
+      const parsed = parseToolArgs(toolSchemas.ig_post_carousel, args);
+      return manager.postCarousel(parsed.image_urls, parsed.caption, {
+        location_id: parsed.location_id
+      });
+    },
+    ig_post_reel: async (args) => {
+      const parsed = parseToolArgs(toolSchemas.ig_post_reel, args);
+      return manager.postReel(parsed.video_url, parsed.caption, {
+        cover_url: parsed.cover_url,
+        location_id: parsed.location_id,
+        share_to_feed: parsed.share_to_feed
+      });
+    },
+    ig_get_comments: async (args) => {
+      const parsed = parseToolArgs(toolSchemas.ig_get_comments, args);
+      return manager.getComments(parsed.media_id, parsed.limit);
+    },
+    ig_reply_comment: async (args) => {
+      const parsed = parseToolArgs(toolSchemas.ig_reply_comment, args);
+      return manager.replyComment(parsed.comment_id, parsed.message);
+    },
+    ig_delete_comment: async (args) => {
+      const parsed = parseToolArgs(toolSchemas.ig_delete_comment, args);
+      return manager.deleteComment(parsed.comment_id);
     },
     ig_get_recent_media: async (args) => {
       const parsed = parseToolArgs(toolSchemas.ig_get_recent_media, args);
